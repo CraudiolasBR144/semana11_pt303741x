@@ -1,50 +1,87 @@
 {% extends "base.html" %}
+
 {% import "bootstrap/wtf.html" as wtf %}
 
 {% block title %}
-Semana 11.A - E-mail
+Avaliação contínua: Aula 070
 {% endblock %}
-
 
 {% block page_content %}
 
 <div class="page-header">
 
     <h1>
+
         Olá,
+
         {% if name %}
+
             {{ name }}
+
         {% else %}
-            visitante
+
+            Stranger
+
         {% endif %}!
+
     </h1>
 
-    {% if not known %}
-        <p>Prazer em conhecê-lo!</p>
+    {% if name %}
+
+        {% if known %}
+
+            <p>
+                Feliz em vê-lo novamente!
+            </p>
+
+        {% else %}
+
+            <p>
+                Prazer em conhecê-lo!
+            </p>
+
+        {% endif %}
+
     {% else %}
-        <p>Feliz em vê-lo novamente!</p>
+
+        <p>
+            Prazer em conhecê-lo!
+        </p>
+
+    {% endif %}
+
+    {% if email_sent %}
+
+        <p>
+            E-mail enviado para o
+            <strong>Administrador do sistema</strong>,
+            notificando o cadastro de um novo usuário.
+        </p>
+
     {% endif %}
 
 </div>
 
-
 {{ wtf.quick_form(form) }}
 
-
-<h2>Relação de usuários cadastrados</h2>
-
-<p>
-    Quantidade: {{ quantidade_usuarios }}
-</p>
-
+<h2>
+    Relação de usuários cadastrados
+</h2>
 
 <table class="table">
 
     <thead>
 
         <tr>
-            <th>Nome do usuário</th>
-            <th>Função</th>
+
+            <th>
+                Nome do usuário
+            </th>
+
+            <th>
+                Função
+            </th>
+
         </tr>
 
     </thead>
@@ -75,82 +112,10 @@ Semana 11.A - E-mail
 
         </tr>
 
-        {% else %}
-
-        <tr>
-
-            <td colspan="2">
-                Nenhum usuário cadastrado.
-            </td>
-
-        </tr>
-
         {% endfor %}
 
     </tbody>
 
 </table>
-
-
-<h2>Relação de funções cadastradas</h2>
-
-<p>
-    Quantidade: {{ quantidade_funcoes }}
-</p>
-
-
-<table class="table">
-
-    <thead>
-
-        <tr>
-            <th>Funções</th>
-            <th>Usuários</th>
-        </tr>
-
-    </thead>
-
-    <tbody>
-
-        {% for role in roles %}
-
-        <tr>
-
-            <td>
-                {{ role.name }}
-            </td>
-
-            <td>
-
-                {% if role.users %}
-
-                    <ol>
-
-                        {% for user in role.users %}
-
-                            <li>
-                                {{ user.username }}
-                            </li>
-
-                        {% endfor %}
-
-                    </ol>
-
-                {% else %}
-
-                    Nenhum usuário cadastrado.
-
-                {% endif %}
-
-            </td>
-
-        </tr>
-
-        {% endfor %}
-
-    </tbody>
-
-</table>
-
 
 {% endblock %}
