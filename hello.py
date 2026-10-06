@@ -1,108 +1,34 @@
 import os
-import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+import requests
+from dotenv import load_dotenv
 from flask import Flask, render_template, session, redirect, url_for
 from flask_bootstrap import Bootstrap
 from flask_moment import Moment
 from flask_wtf import FlaskForm
-from wtforms import StringField, SelectField, BooleanField, SubmitField
-from wtforms.validators import DataRequired, Length
+from wtforms import StringField, SubmitField, BooleanField
+from wtforms.validators import DataRequired
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from dotenv import load_dotenv
 
-
-# ---------------------------------------------------------
-# CONFIGURAÇÕES INICIAIS
-# ---------------------------------------------------------
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
-load_dotenv(
-    os.path.join(basedir, '.env'),
-    override=True
-)
-
-FUNCOES = (
-    'Administrator',
-    'Moderator',
-    'User'
-)
+load_dotenv(os.path.join(basedir, '.env'))
 
 app = Flask(__name__)
 
-
-# ---------------------------------------------------------
-# CONFIGURAÇÕES DO FLASK
-# ---------------------------------------------------------
-
-app.config['SECRET_KEY'] = 'hard to guess string'
-
-app.config['SQLALCHEMY_DATABASE_URI'] = (
-    'sqlite:///' + os.path.join(basedir, 'data.sqlite')
+app.config['SECRET_KEY'] = os.getenv(
+    'SECRET_KEY',
+    'hard to guess string'
 )
+
+app.config['SQLALCHEMY_DATABASE_URI'] = \
+    'sqlite:///' + os.path.join(basedir, 'data.sqlite')
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-
-# ---------------------------------------------------------
-# CONFIGURAÇÕES DO MAILGUN
-# ---------------------------------------------------------
-
-app.config['API_KEY'] = os.environ.get('API_KEY')
-app.config['API_URL'] = os.environ.get('API_URL')
-app.config['API_FROM'] = os.environ.get('API_FROM')
-
-app.config['FLASKY_MAIL_SUBJECT_PREFIX'] = '[Flasky]'
-
-# E-mail institucional do aluno
-app.config['FLASKY_ADMIN'] = os.environ.get('FLASKY_ADMIN')
-
-app.config['ALUNO_NOME'] = os.environ.get('ALUNO_NOME')
-app.config['ALUNO_PRONTUARIO'] = os.environ.get('ALUNO_PRONTUARIO')
-
-
-# ---------------------------------------------------------
-# DEBUG MAILGUN
-# ---------------------------------------------------------
-
-print('------------------------------')
-print('CONFIGURAÇÃO MAILGUN')
-print('------------------------------')
-
-print(
-    'API_URL:',
-    app.config['API_URL']
-)
-
-print(
-    'API_FROM:',
-    app.config['API_FROM']
-)
-
-print(
-    'FLASKY_ADMIN:',
-    app.config['FLASKY_ADMIN']
-)
-
-print(
-    'API_KEY carregada:',
-    bool(app.config['API_KEY'])
-)
-
-print(
-    'Tamanho API_KEY:',
-    len(app.config['API_KEY'])
-    if app.config['API_KEY']
-    else 0
-)
-
-print('------------------------------')
-
-
-# ---------------------------------------------------------
-# EXTENSÕES
-# ---------------------------------------------------------
 
 bootstrap = Bootstrap(app)
 moment = Moment(app)
@@ -110,10 +36,15 @@ moment = Moment(app)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
+FLASKY_ADMIN = os.getenv('FLASKY_ADMIN')
+API_URL = os.getenv('API_URL')
+API_KEY = os.getenv('API_KEY')
+API_FROM = os.getenv('API_FROM')
+FLASKY_NAME = os.getenv('FLASKY_NAME')
+FLASKY_PRONTUARIO = os.getenv('FLASKY_PRONTUARIO')
 
-# ---------------------------------------------------------
-# MODELOS
-# ---------------------------------------------------------
+PROFESSOR_EMAIL = 'flaskaulasweb@zohomail.com'
+
 
 class Role(db.Model):
 
@@ -163,294 +94,166 @@ class User(db.Model):
         return '<User %r>' % self.username
 
 
-# ---------------------------------------------------------
-# FORMULÁRIO
-# ---------------------------------------------------------
+class Email(db.Model):
+
+    __tablename__ = 'emails'
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    sender = db.Column(
+        db.String(64),
+        nullable=False
+    )
+
+    recipients = db.Column(
+        db.Text,
+        nullable=False
+    )
+
+    subject = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    text = db.Column(
+        db.Text,
+        nullable=False
+    )
+
+    body = db.Column(
+        db.Text,
+        nullable=False
+    )
+
+    timestamp = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(
+            ZoneInfo('America/Sao_Paulo')
+        ),
+        nullable=False
+    )
+
+    def __repr__(self):
+        return '<Email %r>' % self.id
+
 
 class NameForm(FlaskForm):
 
     name = StringField(
-        'Nome do usuário:',
-        filters=[
-            lambda value: value.strip()
-            if value
-            else value
-        ],
-        validators=[
-            DataRequired(),
-            Length(max=64)
-        ]
+        'Qual é o seu nome?',
+        validators=[DataRequired()]
     )
 
-    role = SelectField(
-        'Função:',
-        choices=[
-            ('Administrator', 'Administrator'),
-            ('Moderator', 'Moderator'),
-            ('User', 'User')
-        ],
-        validators=[
-            DataRequired()
-        ]
+    send_professor = BooleanField(
+        'Deseja enviar e-mail para flaskaulasweb@zohomail.com?'
     )
 
-    enviar_email = BooleanField(
-        'Enviar e-mail de notificação'
-    )
-
-    submit = SubmitField(
-        'Cadastrar'
-    )
+    submit = SubmitField('Submit')
 
 
-# ---------------------------------------------------------
-# MAILGUN
-# ---------------------------------------------------------
+def get_user_role():
 
-def enviar_email_novo_usuario(usuario):
-
-    api_url = app.config['API_URL']
-    api_key = app.config['API_KEY']
-    remetente = app.config['API_FROM']
-
-    # Somente o e-mail institucional
-    email_aluno = app.config['FLASKY_ADMIN']
-
-    nome_aluno = app.config['ALUNO_NOME']
-    prontuario = app.config['ALUNO_PRONTUARIO']
-
-
-    # -----------------------------------------------------
-    # VALIDAÇÕES
-    # -----------------------------------------------------
-
-    if not api_url:
-        raise RuntimeError(
-            'API_URL não configurada no arquivo .env.'
-        )
-
-    if not api_key:
-        raise RuntimeError(
-            'API_KEY não configurada no arquivo .env.'
-        )
-
-    if not remetente:
-        raise RuntimeError(
-            'API_FROM não configurado no arquivo .env.'
-        )
-
-    if not email_aluno:
-        raise RuntimeError(
-            'FLASKY_ADMIN não configurado no arquivo .env.'
-        )
-
-
-    # -----------------------------------------------------
-    # CONTEÚDO DO E-MAIL
-    # -----------------------------------------------------
-
-    corpo = f"""
-Novo usuário cadastrado na aplicação Flask.
-
-Aluno responsável:
-
-Nome: {nome_aluno}
-Prontuário: {prontuario}
-
-Usuário cadastrado:
-
-Nome: {usuario.username}
-Função: {usuario.role.name}
-"""
-
-
-    # -----------------------------------------------------
-    # DADOS DO E-MAIL
-    # -----------------------------------------------------
-
-    dados = {
-        'from': remetente,
-
-        # SOMENTE PARA O E-MAIL INSTITUCIONAL
-        'to': email_aluno,
-
-        'subject': (
-            f"{app.config['FLASKY_MAIL_SUBJECT_PREFIX']} "
-            f"Novo usuário cadastrado"
-        ),
-
-        'text': corpo
-    }
-
-
-    # -----------------------------------------------------
-    # ENVIO PARA O MAILGUN
-    # -----------------------------------------------------
-
-    try:
-
-        resposta = requests.post(
-            api_url,
-            auth=(
-                'api',
-                api_key
-            ),
-            data=dados,
-            timeout=15
-        )
-
-    except requests.RequestException as erro:
-
-        print(
-            'Erro de comunicação com o Mailgun:',
-            erro
-        )
-
-        raise RuntimeError(
-            'Não foi possível conectar ao Mailgun.'
-        ) from erro
-
-
-    # -----------------------------------------------------
-    # DEBUG
-    # -----------------------------------------------------
-
-    print('------------------------------')
-    print('RESPOSTA MAILGUN')
-    print('------------------------------')
-
-    print(
-        'Status:',
-        resposta.status_code
-    )
-
-    print(
-        'Resposta:',
-        resposta.text
-    )
-
-    print('------------------------------')
-
-
-    # -----------------------------------------------------
-    # TRATAMENTO DE ERROS
-    # -----------------------------------------------------
-
-    if resposta.status_code == 401:
-
-        raise RuntimeError(
-            'Mailgun retornou 401 Unauthorized. '
-            'Verifique a API_KEY.'
-        )
-
-    if resposta.status_code == 403:
-
-        raise RuntimeError(
-            'Mailgun retornou 403 Forbidden. '
-            'Verifique se o e-mail institucional '
-            'está autorizado no sandbox.'
-        )
-
-    if resposta.status_code >= 400:
-
-        raise RuntimeError(
-            f'Erro do Mailgun '
-            f'({resposta.status_code}): '
-            f'{resposta.text}'
-        )
-
-
-    print(
-        'E-mail enviado com sucesso pelo Mailgun.'
-    )
-
-    return resposta
-
-
-# ---------------------------------------------------------
-# BANCO DE DADOS
-# ---------------------------------------------------------
-
-def preparar_banco():
-
-    db.create_all()
-
-    for nome_funcao in FUNCOES:
-
-        funcao = Role.query.filter_by(
-            name=nome_funcao
-        ).first()
-
-        if funcao is None:
-
-            db.session.add(
-                Role(
-                    name=nome_funcao
-                )
-            )
-
-    db.session.flush()
-
-
-    funcao_user = Role.query.filter_by(
+    role = Role.query.filter_by(
         name='User'
     ).first()
 
+    if role is None:
 
-    usuarios_sem_funcao = User.query.filter_by(
-        role_id=None
-    ).all()
+        role = Role(
+            name='User'
+        )
+
+        db.session.add(role)
+        db.session.commit()
+
+    return role
 
 
-    for usuario in usuarios_sem_funcao:
+def send_registration_email(user, recipients):
 
-        usuario.role = funcao_user
+    if not API_URL:
+        raise RuntimeError(
+            'API_URL não configurada.'
+        )
 
+    if not API_KEY:
+        raise RuntimeError(
+            'API_KEY não configurada.'
+        )
 
+    if not API_FROM:
+        raise RuntimeError(
+            'API_FROM não configurado.'
+        )
+
+    if not FLASKY_ADMIN:
+        raise RuntimeError(
+            'FLASKY_ADMIN não configurado.'
+        )
+
+    subject = '[Flasky] Novo usuário'
+
+    text = f'Novo usuário cadastrado: {user.username}'
+
+    body = f"""
+Novo usuário cadastrado.
+
+Prontuário: {FLASKY_PRONTUARIO}
+
+Nome do aluno: {FLASKY_NAME}
+
+Usuário cadastrado: {user.username}
+"""
+
+    response = requests.post(
+        API_URL,
+        auth=(
+            'api',
+            API_KEY
+        ),
+        data={
+            'from': API_FROM,
+            'to': recipients,
+            'subject': subject,
+            'text': body
+        },
+        timeout=15
+    )
+
+    response.raise_for_status()
+
+    recipients_text = ', '.join(
+        f"'{recipient}'"
+        for recipient in recipients
+    )
+
+    email = Email(
+        sender=user.username,
+        recipients=recipients_text,
+        subject=subject,
+        text=text,
+        body=body
+    )
+
+    db.session.add(email)
     db.session.commit()
 
+    return response.json()
 
-# ---------------------------------------------------------
-# PREPARA BANCO
-# ---------------------------------------------------------
-
-with app.app_context():
-
-    preparar_banco()
-
-
-# ---------------------------------------------------------
-# SHELL
-# ---------------------------------------------------------
 
 @app.shell_context_processor
 def make_shell_context():
 
-    return {
-        'db': db,
-        'User': User,
-        'Role': Role
-    }
-
-
-# ---------------------------------------------------------
-# COMANDO INIT-DB
-# ---------------------------------------------------------
-
-@app.cli.command('init-db')
-def init_db():
-
-    preparar_banco()
-
-    print(
-        'Banco pronto. '
-        'Cadastros existentes preservados.'
+    return dict(
+        db=db,
+        User=User,
+        Role=Role,
+        Email=Email
     )
 
-
-# ---------------------------------------------------------
-# ERROS
-# ---------------------------------------------------------
 
 @app.errorhandler(404)
 def page_not_found(e):
@@ -468,189 +271,122 @@ def internal_server_error(e):
     ), 500
 
 
-# ---------------------------------------------------------
-# PÁGINA PRINCIPAL
-# ---------------------------------------------------------
-
-@app.route(
-    '/',
-    methods=[
-        'GET',
-        'POST'
-    ]
-)
+@app.route('/', methods=['GET', 'POST'])
 def index():
 
     form = NameForm()
 
-
     if form.validate_on_submit():
 
+        username = form.name.data.strip()
+
         user = User.query.filter_by(
-            username=form.name.data
+            username=username
         ).first()
 
-
-        role = Role.query.filter_by(
-            name=form.role.data
-        ).first()
-
-
-        # -------------------------------------------------
-        # FUNÇÃO PADRÃO
-        # -------------------------------------------------
-
-        if role is None:
-
-            role = Role.query.filter_by(
-                name='User'
-            ).first()
-
-
-        # -------------------------------------------------
-        # NOVO USUÁRIO
-        # -------------------------------------------------
+        session['email_sent'] = False
 
         if user is None:
 
+            user_role = get_user_role()
+
             user = User(
-                username=form.name.data,
-                role=role
+                username=username,
+                role=user_role
             )
 
-            db.session.add(
-                user
-            )
-
-            db.session.flush()
-
-
-            # ---------------------------------------------
-            # ENVIA E-MAIL SOMENTE SE A OPÇÃO FOR MARCADA
-            # ---------------------------------------------
-
-            if form.enviar_email.data:
-
-                try:
-
-                    enviar_email_novo_usuario(
-                        user
-                    )
-
-                except Exception as erro:
-
-                    db.session.rollback()
-
-                    print(
-                        'Erro ao cadastrar/enviar e-mail:',
-                        erro
-                    )
-
-                    raise
-
-
+            db.session.add(user)
             db.session.commit()
 
             session['known'] = False
 
+            recipients = [
+                FLASKY_ADMIN
+            ]
 
-        # -------------------------------------------------
-        # USUÁRIO EXISTENTE
-        # -------------------------------------------------
+            if form.send_professor.data:
+
+                recipients.append(
+                    PROFESSOR_EMAIL
+                )
+
+            try:
+
+                send_registration_email(
+                    user,
+                    recipients
+                )
+
+                session['email_sent'] = True
+
+            except Exception as error:
+
+                print(
+                    'Erro ao enviar e-mail:',
+                    error
+                )
 
         else:
 
-            user.role = role
-
-            db.session.commit()
-
             session['known'] = True
 
-
-        session['name'] = form.name.data
-
+        session['name'] = username
 
         return redirect(
             url_for('index')
         )
 
-
-    # -----------------------------------------------------
-    # LISTAGEM DE USUÁRIOS
-    # -----------------------------------------------------
-
     users = User.query.order_by(
         User.id
     ).all()
 
+    roles = Role.query.order_by(
+        Role.id
+    ).all()
 
-    # -----------------------------------------------------
-    # LISTAGEM POR FUNÇÃO
-    # -----------------------------------------------------
+    users_count = User.query.count()
 
-    roles = []
+    roles_count = Role.query.count()
 
+    grouped_roles = []
 
-    for nome_funcao in FUNCOES:
+    for role in roles:
 
-        role = Role.query.filter_by(
-            name=nome_funcao
-        ).first()
+        role_users = role.users.order_by(
+            User.id
+        ).all()
 
-
-        if role is not None:
-
-            roles.append({
-                'name': role.name,
-                'users': role.users.order_by(
-                    User.id
-                ).all()
-            })
-
-
-    # -----------------------------------------------------
-    # CONTADORES
-    # -----------------------------------------------------
-
-    quantidade_usuarios = User.query.count()
-
-    quantidade_funcoes = Role.query.count()
-
-
-    # -----------------------------------------------------
-    # TEMPLATE
-    # -----------------------------------------------------
+        grouped_roles.append({
+            'role': role,
+            'users': role_users
+        })
 
     return render_template(
         'index.html',
-
         form=form,
-
-        name=session.get(
-            'name'
-        ),
-
-        known=session.get(
-            'known',
-            False
-        ),
-
+        name=session.get('name'),
+        known=session.get('known', False),
+        email_sent=session.get('email_sent', False),
         users=users,
-
         roles=roles,
-
-        quantidade_usuarios=quantidade_usuarios,
-
-        quantidade_funcoes=quantidade_funcoes
+        users_count=users_count,
+        roles_count=roles_count,
+        grouped_roles=grouped_roles
     )
 
 
-# ---------------------------------------------------------
-# EXECUÇÃO LOCAL
-# ---------------------------------------------------------
+@app.route('/emailsEnviados')
+def emails_enviados():
+
+    emails = Email.query.order_by(
+        Email.timestamp.desc()
+    ).all()
+
+    return render_template(
+        'emailsEnviados.html',
+        emails=emails
+    )
+
 
 if __name__ == '__main__':
-
-    app.run(
-        debug=True
-    )
+    app.run(debug=True)
